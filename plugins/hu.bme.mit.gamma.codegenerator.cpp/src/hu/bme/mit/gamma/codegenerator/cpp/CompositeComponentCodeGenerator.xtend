@@ -58,9 +58,8 @@ class CompositeComponentCodeGenerator {
 	 */
 	def CharSequence delegateRaisingMethods(PortBinding connector) '''
 		«FOR event : Collections.singletonList(connector.instancePortReference.port).getSemanticEvents(EventDirection.IN) SEPARATOR "\n"»
-			@Override
-			public void raise«event.name.toFirstUpper»(«(event.eContainer as EventDeclaration).generateParameter») {
-				«connector.instancePortReference.instance.name».get«connector.instancePortReference.port.name.toFirstUpper»().raise«event.name.toFirstUpper»(«event.parameterDeclarations.head.eventParameterValue»);
+			void raise«event.name.toFirstUpper»(«(event.eContainer as EventDeclaration).generateParameter») override {
+				parent.«connector.instancePortReference.instance.name».get«connector.instancePortReference.port.name.toFirstUpper»().raise«event.name.toFirstUpper»(«event.parameterDeclarations.head.eventParameterValue»);
 			}
 		«ENDFOR»
 	'''
@@ -91,14 +90,12 @@ class CompositeComponentCodeGenerator {
 	protected def CharSequence implementOutMethods(PortBinding connector) '''
 «««		Simple flag checks
 		«FOR event : Collections.singletonList(connector.compositeSystemPort).getSemanticEvents(EventDirection.OUT) SEPARATOR "\n"»
-			@Override
-			public boolean isRaised«event.name.toFirstUpper»() {
-				return isRaised«event.name.toFirstUpper»;
+			bool isRaised«event.name.toFirstUpper»() override {
+				return mIsRaised«event.name.toFirstUpper»;
 			}
 «««		ValueOf checks
 			«IF !event.parameterDeclarations.empty»
-				@Override
-				public «event.toYakinduEvent(connector.compositeSystemPort).type.eventParameterType» get«event.name.toFirstUpper»Value() {
+				«event.toYakinduEvent(connector.compositeSystemPort).type.eventParameterType» get«event.name.toFirstUpper»Value() override {
 					return «event.name.toFirstLower»Value;
 				}
 			«ENDIF»
@@ -108,7 +105,7 @@ class CompositeComponentCodeGenerator {
 	/** Sets the parameters of the component and instantiates the necessary components with them. */
 	def createInstances(CompositeComponent component) '''
 		«FOR parameter : component.parameterDeclarations SEPARATOR ", "»
-			this.«parameter.name» = «parameter.name»;
+			this->«parameter.name» = «parameter.name»;
 		«ENDFOR»
 		«FOR instance : component.derivedComponents»
 			«instance.name» = new «instance.derivedType.generateComponentClassName»(«FOR argument : instance.arguments SEPARATOR ", "»«argument.serialize»«ENDFOR»);

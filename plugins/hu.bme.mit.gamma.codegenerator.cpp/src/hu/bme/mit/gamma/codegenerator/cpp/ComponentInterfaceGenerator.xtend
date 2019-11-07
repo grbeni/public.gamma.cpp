@@ -39,25 +39,36 @@ class ComponentInterfaceGenerator {
 			ports += component.ports
 		}
 		val interfaceCode = '''
-			package «component.generateComponentPackageName»;
+			//package «component.generateComponentPackageName»;
 			
+			#ifndef «component.generatePortOwnerInterfaceName.toUpperCase»
+			#define «component.generatePortOwnerInterfaceName.toUpperCase»
+			
+			«var list = newArrayList()»
 			«FOR interfaceName : ports.map[it.interfaceRealization.interface.generateName].toSet»
-				import «PACKAGE_NAME».«Namings.INTERFACE_PACKAGE_POSTFIX».«interfaceName»;
+				«IF !list.contains(interfaceName)»
+					#include "../interfaces/«interfaceName».h"
+					«IF list.add(interfaceName)» «««supress output
+					«ENDIF»
+				«ENDIF»
 			«ENDFOR»
 			
-			public interface «component.generatePortOwnerInterfaceName» {
-				
+			//ComponentInterfaceGenerator
+			class «component.generatePortOwnerInterfaceName» {
+			  public:
 				«FOR port : ports»
-					«port.implementedJavaInterfaceName» get«port.name.toFirstUpper»();
+					virtual «port.implementedCppInterfaceName»& get«port.name.toFirstUpper»() = 0;
 				«ENDFOR»
 				
-				void reset();
+				virtual void reset() = 0;
 				
-				«IF component instanceof SynchronousComponent»void runCycle();«ENDIF»
-				«IF component instanceof AbstractSynchronousCompositeComponent»void runFullCycle();«ENDIF»
-				«IF component instanceof AsynchronousComponent»void start();«ENDIF»
-				
-			}
+				«IF component instanceof SynchronousComponent»virtual void runCycle() = 0;«ENDIF»
+				«IF component instanceof AbstractSynchronousCompositeComponent»virtual void runFullCycle() = 0;«ENDIF»
+				«IF component instanceof AsynchronousComponent»virtual void start() = 0;«ENDIF»
+			
+			};
+			
+			#endif
 		'''
 		return interfaceCode
 	}

@@ -32,6 +32,7 @@ class AsynchronousCompositeComponentCodeGenerator {
 		
 		«component.generateCompositeSystemImports»
 		
+		//AsynchronousComponentWrapperCode
 		public class «component.generateComponentClassName» implements «component.generatePortOwnerInterfaceName» {
 			// Component instances
 			«FOR instance : component.components»

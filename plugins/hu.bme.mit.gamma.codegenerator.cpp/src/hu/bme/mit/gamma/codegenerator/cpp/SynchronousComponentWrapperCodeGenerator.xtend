@@ -48,6 +48,7 @@ class SynchronousComponentWrapperCodeGenerator {
 		
 		«component.generateWrapperImports»
 		
+		//SynchronousComponentWrapperCode
 		public class «component.generateComponentClassName» implements Runnable, «component.generatePortOwnerInterfaceName» {			
 			// Thread running this wrapper instance
 			private Thread thread;

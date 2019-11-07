@@ -89,6 +89,12 @@ class NameGenerator {
 	protected def getImplementedJavaInterfaceName(Port port) '''«port.interfaceRealization.interface.generateName».«port.interfaceRealization.realizationMode.toString.toLowerCase.toFirstUpper»'''
 	
 	/**
+	 * Returns the name of the C++ interface the given port realizes, e.g., Controller.Required.
+	 */
+	protected def getImplementedCppInterfaceName(Port port) '''«port.interfaceRealization.interface.generateName»::«port.interfaceRealization.realizationMode.toString.toLowerCase.toFirstUpper»'''
+	
+	
+	/**
 	 * Returns the type name of the interface of the wrapped Yakindu statemachine.
 	 */
 	protected def getYakinduRealizationModeName(Port port) {
