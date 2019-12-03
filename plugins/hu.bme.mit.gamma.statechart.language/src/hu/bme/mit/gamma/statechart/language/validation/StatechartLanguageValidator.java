@@ -27,10 +27,13 @@ import org.eclipse.xtext.EcoreUtil2;
 import org.eclipse.xtext.validation.Check;
 
 import hu.bme.mit.gamma.action.model.Action;
+import hu.bme.mit.gamma.action.model.ActionModelPackage;
 import hu.bme.mit.gamma.action.model.AssignmentStatement;
-import hu.bme.mit.gamma.expression.model.ExpressionModelPackage;
+import hu.bme.mit.gamma.action.model.ExpressionStatement;
+import hu.bme.mit.gamma.expression.language.validation.ExpressionType;
 import hu.bme.mit.gamma.expression.model.Declaration;
 import hu.bme.mit.gamma.expression.model.Expression;
+import hu.bme.mit.gamma.expression.model.ExpressionModelPackage;
 import hu.bme.mit.gamma.expression.model.ParameterDeclaration;
 import hu.bme.mit.gamma.expression.model.ReferenceExpression;
 import hu.bme.mit.gamma.expression.model.Type;
@@ -61,6 +64,7 @@ import hu.bme.mit.gamma.statechart.model.SimpleTrigger;
 import hu.bme.mit.gamma.statechart.model.StateNode;
 import hu.bme.mit.gamma.statechart.model.StatechartDefinition;
 import hu.bme.mit.gamma.statechart.model.StatechartModelPackage;
+import hu.bme.mit.gamma.statechart.model.TimeSpecification;
 import hu.bme.mit.gamma.statechart.model.TimeoutDeclaration;
 import hu.bme.mit.gamma.statechart.model.Transition;
 import hu.bme.mit.gamma.statechart.model.TransitionPriority;
@@ -110,6 +114,11 @@ public class StatechartLanguageValidator extends AbstractStatechartLanguageValid
 	@Check
 	public void checkUnsupportedTriggers(OpaqueTrigger trigger) {
 		error("Not supported trigger.", StatechartModelPackage.Literals.OPAQUE_TRIGGER__TRIGGER);
+	}
+	
+	@Check
+	public void checkUnsupportedExpressionStatements(ExpressionStatement expressionStatement) {
+		error("Expression statements are not supported in the GSL.", ActionModelPackage.Literals.EXPRESSION_STATEMENT__EXPRESSION);
 	}
 	
 	// Interfaces
@@ -294,6 +303,23 @@ public class StatechartLanguageValidator extends AbstractStatechartLanguageValid
 		Event event = raiseEvent.getEvent();
 		if (!getSemanticEvents(Collections.singleton(port), EventDirection.OUT).contains(event)) {
 			error("This event is not an out event.", StatechartModelPackage.Literals.RAISE_EVENT_ACTION__EVENT);
+		}
+		if (!raiseEvent.getArguments().isEmpty() && raiseEvent.getEvent().getParameterDeclarations().isEmpty()) {
+			error("This event is not parametric.", StatechartModelPackage.Literals.RAISE_EVENT_ACTION__EVENT);
+		}
+		if (!raiseEvent.getArguments().isEmpty()) {
+			EObject eContainer = raiseEvent.eContainer();
+			for (EObject raiseEventObject : eContainer.eContents().stream()
+					.filter(it -> it instanceof RaiseEventAction)
+					.filter(it -> eContainer.eContents().indexOf(it) > eContainer.eContents().indexOf(raiseEvent))
+					.collect(Collectors.toList())) {
+				RaiseEventAction otherRaiseEvent = (RaiseEventAction) raiseEventObject;
+				if (otherRaiseEvent.getPort() == raiseEvent.getPort() &&
+						otherRaiseEvent.getEvent() == raiseEvent.getEvent() &&
+						!otherRaiseEvent.getArguments().isEmpty()) {
+					warning("This event raise argument is overriden by other event raise arguments.", ExpressionModelPackage.Literals.ARGUMENTED_ELEMENT__ARGUMENTS);
+				}
+			}
 		}
 		if (!raiseEvent.getArguments().isEmpty() && raiseEvent.getEvent().getParameterDeclarations().isEmpty()) {
 			error("This event is not parametric.", StatechartModelPackage.Literals.RAISE_EVENT_ACTION__EVENT);
@@ -510,7 +536,7 @@ public class StatechartLanguageValidator extends AbstractStatechartLanguageValid
 				error("Transitions from choice nodes must not have triggers.", StatechartModelPackage.Literals.TRANSITION__TRIGGER);
 			}
 			if (transition.getGuard() == null) {
-				error("Transitions from choice nodes must have guards.", StatechartModelPackage.Literals.TRANSITION__GUARD);
+				warning("Transitions from choice nodes should have guards if you want deterministic behavior.", StatechartModelPackage.Literals.TRANSITION__GUARD);
 			}
 		}
 		if (source instanceof ForkState) {
@@ -776,6 +802,13 @@ public class StatechartLanguageValidator extends AbstractStatechartLanguageValid
 			error("The orientation of this transition is incorrect as the source and target are in orthogonal regions "
 				+ "of the following states: " +	commonAncestors.stream().map(it -> it.getName()).collect(Collectors.toSet())
 				+ ".", StatechartModelPackage.Literals.TRANSITION__SOURCE_STATE);
+		}
+	}
+	
+	@Check
+	public void checkTimeSpecification(TimeSpecification timeSpecification) {
+		if (!typeDeterminator.isInteger(timeSpecification.getValue())) {
+			error("Time values must be of type integer.", StatechartModelPackage.Literals.TIME_SPECIFICATION__VALUE);
 		}
 	}
 	

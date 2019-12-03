@@ -1,7 +1,9 @@
 package hu.bme.mit.gamma.codegenerator.java
 
+import hu.bme.mit.gamma.expression.model.VariableDeclaration
 import hu.bme.mit.gamma.statechart.model.Port
 import hu.bme.mit.gamma.statechart.model.RealizationMode
+import hu.bme.mit.gamma.statechart.model.StatechartDefinition
 import hu.bme.mit.gamma.statechart.model.composite.Component
 import hu.bme.mit.gamma.statechart.model.interface_.EventDeclaration
 import hu.bme.mit.gamma.statechart.model.interface_.EventDirection
@@ -10,23 +12,26 @@ import org.yakindu.base.types.Direction
 import org.yakindu.base.types.Event
 import org.yakindu.sct.model.sgraph.Statechart
 import org.yakindu.sct.model.stext.stext.InterfaceScope
+import org.yakindu.sct.model.stext.stext.VariableDefinition
+
+import static extension hu.bme.mit.gamma.statechart.model.derivedfeatures.StatechartModelDerivedFeatures.*
 
 class StatechartWrapperCodeGenerator {
 	
-	final String PACKAGE_NAME
-	final String YAKINDU_PACKAGE_NAME
+	protected final String PACKAGE_NAME
+	protected final String YAKINDU_PACKAGE_NAME
 	// 
-	final extension TimingDeterminer timingDeterminer = new TimingDeterminer
-	final extension Trace trace
-	final extension NameGenerator nameGenerator
-	final extension TypeTransformer typeTransformer
-	final extension EventDeclarationHandler gammaEventDeclarationHandler
-	final extension ComponentCodeGenerator componentCodeGenerator
+	protected final extension TimingDeterminer timingDeterminer = new TimingDeterminer
+	protected final extension Trace trace
+	protected final extension NameGenerator nameGenerator
+	protected final extension TypeTransformer typeTransformer
+	protected final extension EventDeclarationHandler gammaEventDeclarationHandler
+	protected final extension ComponentCodeGenerator componentCodeGenerator
 	//
-	final String INSERT_QUEUE = "insertQueue"
-	final String PROCESS_QUEUE = "processQueue"
-	final String EVENT_QUEUE = "eventQueue"
-	final String EVENT_INSTANCE_NAME = "event"
+	protected final String INSERT_QUEUE = "insertQueue"
+	protected final String PROCESS_QUEUE = "processQueue"
+	protected final String EVENT_QUEUE = "eventQueue"
+	protected final String EVENT_INSTANCE_NAME = "event"
 
 	new(String packageName, String yakinduPackageName, Trace trace) {
 		this.PACKAGE_NAME = packageName
@@ -41,7 +46,7 @@ class StatechartWrapperCodeGenerator {
 	/**
 	 * Creates the Java code for the given component.
 	 */
-	def createSimpleComponentClass(Component component) '''		
+	def createSimpleComponentClass(StatechartDefinition component) '''		
 		package «component.generateComponentPackageName»;
 		
 		«component.generateSimpleComponentImports»
@@ -187,6 +192,33 @@ class StatechartWrapperCodeGenerator {
 				return «component.generateStatemachineInstanceName».isStateActive(state);
 			}
 			
+			public boolean isStateActive(String region, String state) {
+				switch (region) {
+					«FOR region : component.allRegions»
+						case "«region.name»":
+							switch (state) {
+								«FOR state : region.states»
+									case "«state.name»":
+										return isStateActive(State.«state.fullContainmentHierarchy»);
+								«ENDFOR»
+							}
+					«ENDFOR»
+				}
+				return false;
+			}
+			
+			«FOR port : component.allPorts»
+				«FOR yakinduInterface : port.allValuesOfFrom.filter(InterfaceScope)»
+					«FOR yakinduVariable : yakinduInterface.declarations.filter(VariableDefinition)»
+						«FOR gammaVariable : yakinduVariable.allValuesOfTo.filter(VariableDeclaration)»
+							public «gammaVariable.type.transformType» get«gammaVariable.name.toFirstUpper»() {
+								return «component.generateStatemachineInstanceName».get«port.yakinduInterfaceName»().get«yakinduVariable.name.toFirstUpper»();
+							}
+						«ENDFOR»
+					«ENDFOR»
+				«ENDFOR»
+			«ENDFOR»
+			
 			«IF component.needTimer»
 				public void setTimer(«Namings.YAKINDU_TIMER_INTERFACE» timer) {
 					«component.generateStatemachineInstanceName».setTimer(timer);
@@ -231,7 +263,7 @@ class StatechartWrapperCodeGenerator {
 	 * Generates code raising the Yakindu statechart event "connected" to the given port and component.
 	 */
 	protected def delegateCall(Event event, Component component, Port port) '''
-		«component.generateStatemachineInstanceName».get«port.yakinduRealizationModeName»().raise«event.name.toFirstUpper»(«event.castArgument»);
+		«component.generateStatemachineInstanceName».get«port.yakinduInterfaceName»().raise«event.name.toFirstUpper»(«event.castArgument»);
 	'''
 	
 	/**
@@ -247,7 +279,7 @@ class StatechartWrapperCodeGenerator {
 	 * E.g., generates code that raises event "b" of component "comp" if an "a"  out-event is raised inside the implemented component.
 	 */
 	protected def CharSequence registerListener(Component component, Port port, EventDirection oppositeDirection) '''
-		«component.generateStatemachineInstanceName».get«port.yakinduRealizationModeName»().getListeners().add(new «port.yakinduRealizationModeName»Listener() {
+		«component.generateStatemachineInstanceName».get«port.yakinduInterfaceName»().getListeners().add(new «port.yakinduInterfaceName»Listener() {
 			«FOR event : port.interfaceRealization.interface.getAllEvents(oppositeDirection).map[it.eContainer as EventDeclaration] SEPARATOR "\n"»
 				@Override
 				public void on«event.event.toYakinduEvent(port).name.toFirstUpper»Raised(«event.generateParameter») {
@@ -280,14 +312,14 @@ class StatechartWrapperCodeGenerator {
 				«IF port.name === null»
 					return «component.generateStatemachineInstanceName».isRaised«event.toYakinduEvent(port).name.toFirstUpper»();
 				«ELSE»
-					return «component.generateStatemachineInstanceName».get«port.yakinduRealizationModeName»().isRaised«event.toYakinduEvent(port).name.toFirstUpper»();
+					return «component.generateStatemachineInstanceName».get«port.yakinduInterfaceName»().isRaised«event.toYakinduEvent(port).name.toFirstUpper»();
 				«ENDIF»
 			}
 «««		ValueOf checks
 			«IF event.toYakinduEvent(port).type !== null»
 				@Override
 				public «event.toYakinduEvent(port).type.eventParameterType» get«event.name.toFirstUpper»Value() {
-					return «component.generateStatemachineInstanceName».get«port.yakinduRealizationModeName»().get«event.toYakinduEvent(port).name.toFirstUpper»Value();
+					return «component.generateStatemachineInstanceName».get«port.yakinduInterfaceName»().get«event.toYakinduEvent(port).name.toFirstUpper»Value();
 				}
 			«ENDIF»
 		«ENDFOR»

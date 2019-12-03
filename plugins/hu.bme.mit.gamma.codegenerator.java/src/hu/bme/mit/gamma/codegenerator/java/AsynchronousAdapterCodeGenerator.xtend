@@ -15,19 +15,19 @@ import hu.bme.mit.gamma.statechart.model.interface_.EventDeclaration
 import hu.bme.mit.gamma.statechart.model.interface_.EventDirection
 import java.util.Collections
 
-class SynchronousComponentWrapperCodeGenerator {
+class AsynchronousAdapterCodeGenerator {
 	
-	final String PACKAGE_NAME
+	protected final String PACKAGE_NAME
 	// 
-	final extension TimingDeterminer timingDeterminer = new TimingDeterminer
-	final extension ExpressionSerializer expressionSerializer = new ExpressionSerializer
-	final extension Trace trace
-	final extension NameGenerator nameGenerator
-	final extension TypeTransformer typeTransformer
-	final extension EventDeclarationHandler gammaEventDeclarationHandler
-	final extension ComponentCodeGenerator componentCodeGenerator
+	protected final extension TimingDeterminer timingDeterminer = new TimingDeterminer
+	protected final extension ExpressionSerializer expressionSerializer = new ExpressionSerializer
+	protected final extension Trace trace
+	protected final extension NameGenerator nameGenerator
+	protected final extension TypeTransformer typeTransformer
+	protected final extension EventDeclarationHandler gammaEventDeclarationHandler
+	protected final extension ComponentCodeGenerator componentCodeGenerator
 	//
-	final String EVENT_INSTANCE_NAME = "event"
+	protected final String EVENT_INSTANCE_NAME = "event"
 
 	new(String packageName, Trace trace) {
 		this.PACKAGE_NAME = packageName
@@ -41,7 +41,7 @@ class SynchronousComponentWrapperCodeGenerator {
 	/**
 	* Creates the Java code of the synchronous composite class, containing the statemachine instances.
 	*/
-	protected def createSynchronousComponentWrapperClass(AsynchronousAdapter component) {
+	protected def createAsynchronousAdapterClass(AsynchronousAdapter component) {
 		var clockId = 0
 	'''
 		package «component.generateComponentPackageName»;

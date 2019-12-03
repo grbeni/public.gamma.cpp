@@ -12,6 +12,7 @@ import org.eclipse.emf.ecore.EObject;
 import hu.bme.mit.gamma.statechart.model.AnyPortEventReference;
 import hu.bme.mit.gamma.statechart.model.ClockTickReference;
 import hu.bme.mit.gamma.statechart.model.CompositeElement;
+import hu.bme.mit.gamma.statechart.model.DeepHistoryState;
 import hu.bme.mit.gamma.statechart.model.EventReference;
 import hu.bme.mit.gamma.statechart.model.EventSource;
 import hu.bme.mit.gamma.statechart.model.InterfaceRealization;
@@ -19,6 +20,7 @@ import hu.bme.mit.gamma.statechart.model.Port;
 import hu.bme.mit.gamma.statechart.model.PortEventReference;
 import hu.bme.mit.gamma.statechart.model.RealizationMode;
 import hu.bme.mit.gamma.statechart.model.Region;
+import hu.bme.mit.gamma.statechart.model.ShallowHistoryState;
 import hu.bme.mit.gamma.statechart.model.State;
 import hu.bme.mit.gamma.statechart.model.StateNode;
 import hu.bme.mit.gamma.statechart.model.StatechartDefinition;
@@ -113,29 +115,48 @@ public class StatechartModelDerivedFeatures {
 		return statechart.getTransitions().stream().filter(it -> it.getTargetState() == node).collect(Collectors.toList());
 	}
 	
-	public static Collection<StateNode> getStateNodes(CompositeElement compositeElement) {
+	public static Collection<StateNode> getAllStateNodes(CompositeElement compositeElement) {
 		Set<StateNode> stateNodes = new HashSet<StateNode>();
 		for (Region region : compositeElement.getRegions()) {
 			for (StateNode stateNode : region.getStateNodes()) {
 				stateNodes.add(stateNode);
 				if (stateNode instanceof State) {
 					State state = (State) stateNode;
-					stateNodes.addAll(getStateNodes(state));
+					stateNodes.addAll(getAllStateNodes(state));
 				}
 			}
 		}
 		return stateNodes;
 	}
 	
-	public static Collection<State> getStates(CompositeElement compositeElement) {
+	public static Collection<State> getAllStates(CompositeElement compositeElement) {
 		Set<State> states = new HashSet<State>();
-		for (StateNode stateNode : getStateNodes(compositeElement)) {
+		for (StateNode stateNode : getAllStateNodes(compositeElement)) {
 			if (stateNode instanceof State) {
 				State state = (State) stateNode;
 				states.add(state);
 			}
 		}
 		return states;
+	}
+	
+	public static Collection<State> getStates(Region region) {
+		Set<State> states = new HashSet<State>();
+		for (StateNode stateNode : region.getStateNodes()) {
+			if (stateNode instanceof State) {
+				State state = (State) stateNode;
+				states.add(state);
+			}
+		}
+		return states;
+	}
+	
+	public static Collection<Region> getAllRegions(CompositeElement compositeElement) {
+		Set<Region> regions = new HashSet<Region>(compositeElement.getRegions());
+		for (State state : getAllStates(compositeElement)) {
+			regions.addAll(getAllRegions(state));
+		}
+		return regions;
 	}
 	
 	public static Region getParentRegion(StateNode node) {
@@ -160,6 +181,49 @@ public class StatechartModelDerivedFeatures {
 	public static State getParentState(StateNode node) {
 		Region parentRegion = getParentRegion(node);
 		return getParentState(parentRegion);
+	}
+	
+	public static Region getParentRegion(Region region) {
+		if (isTopRegion(region)) {
+			return null;
+		}
+		return getParentRegion((State) region.eContainer());
+	}
+	
+	/**
+	 * Returns whether the given region has deep history in one of its ancestor regions.
+	 */
+	private static boolean hasDeepHistoryAbove(Region region) {
+		if (isTopRegion(region)) {
+			return false;
+		}
+		Region parentRegion = getParentRegion(region);
+		return parentRegion.getStateNodes().stream().anyMatch(it -> it instanceof DeepHistoryState) ||
+			hasDeepHistoryAbove(parentRegion);
+	}
+	
+	/**
+	 * Returns whether the region has history or not.
+	 */
+	public static boolean hasHistory(Region region) {
+		return hasDeepHistoryAbove(region) || 
+			region.getStateNodes().stream().anyMatch(it -> it instanceof ShallowHistoryState) || 
+			region.getStateNodes().stream().anyMatch(it -> it instanceof DeepHistoryState);
+	}	
+	
+	public static String getFullContainmentHierarchy(State state) {
+		if (state == null) {
+			return "";
+		}
+		Region parentRegion = getParentRegion(state);
+		State parentState = null;
+		if (parentRegion.eContainer() instanceof State) {
+			parentState = getParentState(parentRegion);
+		}
+		if (parentState == null) {
+			return parentRegion.getName() + "_" + state.getName();
+		}
+		return getFullContainmentHierarchy(parentState) + "_" + parentRegion.getName() + "_" + state.getName();
 	}
 	
 	public static StatechartDefinition getContainingStatechart(EObject object) {
@@ -274,6 +338,17 @@ public class StatechartModelDerivedFeatures {
 		}
 		State targetParentState = getParentState(target);
 		return getTargetAncestor(source, targetParentState);
+	}
+	
+	public static boolean isComposite(StateNode node) {
+		if (node instanceof State) {
+			return isComposite((State) node);
+		}
+		return false;
+	}
+	
+	public static boolean isComposite(State state) {
+		return !state.getRegions().isEmpty();
 	}
 	
 }

@@ -11,7 +11,6 @@
 package hu.bme.mit.gamma.uppaal.backannotation
 
 import hu.bme.mit.gamma.statechart.model.Package
-import hu.bme.mit.gamma.statechart.model.Region
 import hu.bme.mit.gamma.statechart.model.State
 import hu.bme.mit.gamma.statechart.model.StatechartDefinition
 import hu.bme.mit.gamma.statechart.model.composite.AbstractSynchronousCompositeComponent
@@ -36,6 +35,8 @@ import org.eclipse.viatra.query.runtime.emf.EMFScope
 
 import static com.google.common.base.Preconditions.checkArgument
 
+import static extension hu.bme.mit.gamma.statechart.model.derivedfeatures.StatechartModelDerivedFeatures.*
+
 class TestGenerator {
 	// Constant strings
 	protected String YAKINDU_PACKAGE_NAME_PREFIX
@@ -46,12 +47,12 @@ class TestGenerator {
 	protected final String TEST_ANNOTATION = "@Test"	
 	protected final String TEST_NAME = "step"	
 	protected final String ASSERT_TRUE = "assertTrue"	
-	protected final String ASSERT_EQUALS = "assertEquals"
 	
 	protected final String[] notHandledStateNamePatterns = #['LocalReactionState[0-9]*','FinalState[0-9]*']
 	// Value is assigned by the execute methods
     protected final String packageName
 	protected final String className
+	protected final String componentClassInterfaceName = "ReflectiveComponentInterface"
 	protected final String componentClassName
 	
 	protected final ViatraQueryEngine engine
@@ -62,7 +63,7 @@ class TestGenerator {
 	protected final Component component
 	protected final ExecutionTrace trace 
 	
-	protected final extension ExpressionSerializer expSer = new ExpressionSerializer
+	protected final extension ExpressionSerializer expressionSerializer = new ExpressionSerializer
 	
 	/**
 	 * Id is needed as a suffix to match the trace file.
@@ -77,7 +78,7 @@ class TestGenerator {
 		// Initializing the string variables
 		this.packageName = getPackageName
     	this.className = className
-		this.componentClassName = component.name.toFirstUpper
+		this.componentClassName = "Reflective" + component.name.toFirstUpper
 	}
 	
 	/**
@@ -101,42 +102,49 @@ class TestGenerator {
 	
 	private def createPackageName() '''package «packageName»;'''
 		
-	protected def generateTestClass(ExecutionTrace trace, Component component, String cName) '''
-	«createPackageName»
-	
-	«component.generateImports»
-	
-	public class «cName» {
+	protected def generateTestClass(ExecutionTrace trace, Component component, String className) '''
+		«createPackageName»
 		
-		private static «componentClassName» «componentClassName.toFirstLower»;
-«««		Only if there are timing specifications in the model
-		«IF component.needTimer»private static «TIMER_CLASS_NAME» «TIMER_OBJECT_NAME»;«ENDIF»
+		«component.generateImports»
 		
-		@Before
-		public void init() {
-			«IF component.needTimer»
-«««				Only if there are timing specs in the model
-				«TIMER_OBJECT_NAME» = new «TIMER_CLASS_NAME»();
-				«componentClassName.toFirstLower» = new «componentClassName»(«FOR parameter : trace.arguments SEPARATOR ', ' AFTER ', '»«parameter.serialize»«ENDFOR»«TIMER_OBJECT_NAME»);  // Virtual timer is automatically set
-			«ELSE»
-				«componentClassName.toFirstLower» = new «componentClassName»(«FOR parameter : trace.arguments SEPARATOR ', ' AFTER ', '»«parameter.serialize»«ENDFOR»);
-			«ENDIF»
-			«componentClassName.toFirstLower».reset();
+		public class «className» {
+			
+			private static «componentClassInterfaceName» «componentClassName.toFirstLower»;
+«««			Only if there are timing specifications in the model
+			«IF component.needTimer»private static «TIMER_CLASS_NAME» «TIMER_OBJECT_NAME»;«ENDIF»
+			
+			@Before
+			public void init() {
+				«IF component.needTimer»
+«««					Only if there are timing specs in the model
+					«TIMER_OBJECT_NAME» = new «TIMER_CLASS_NAME»();
+					«componentClassName.toFirstLower» = new «componentClassName»(«FOR parameter : trace.arguments SEPARATOR ', ' AFTER ', '»«parameter.serialize»«ENDFOR»«TIMER_OBJECT_NAME»);  // Virtual timer is automatically set
+				«ELSE»
+					«componentClassName.toFirstLower» = new «componentClassName»(«FOR parameter : trace.arguments SEPARATOR ', ' AFTER ', '»«parameter.serialize»«ENDFOR»);
+				«ENDIF»
+				«componentClassName.toFirstLower».reset();
+			}
+			
+			@After
+			public void tearDown() {
+				// Only for override by potential subclasses
+				«IF component.needTimer»
+					«TIMER_OBJECT_NAME» = null;
+				«ENDIF»
+				«componentClassName.toFirstLower» = null;
+			}
+			
+			«trace.generateTestCases»
 		}
-		
-		«trace.generateTestCases»
-	}
 	'''
 	
 	protected def generateImports(Component component) '''
-		«IF component.needTimer»
-			import «YAKINDU_PACKAGE_NAME_PREFIX».«TIMER_CLASS_NAME»;
-		«ENDIF»
+		import «YAKINDU_PACKAGE_NAME_PREFIX».*;
 		
 		import static org.junit.Assert.«ASSERT_TRUE»;
-		import static org.junit.Assert.«ASSERT_EQUALS»;
 		
 		import org.junit.Before;
+		import org.junit.After;
 		import org.junit.Test;
 	'''
 	
@@ -144,7 +152,13 @@ class TestGenerator {
 		var testId = 0
 		val builder = new StringBuilder
 		// Parsing the remaining lines
-		for (step : trace.steps) {
+		val steps = newArrayList
+		steps += trace.steps
+		if (trace.cycle !== null) {
+			// Cycle steps are not handled differently
+			steps += trace.cycle.steps
+		}
+		for (step : steps) {
 			val testMethod = '''
 				«TEST_ANNOTATION»
 				public void «TEST_NAME + testId++»() {
@@ -155,19 +169,15 @@ class TestGenerator {
 					«ENDFOR»
 					// Checking out events
 					«FOR outEvent : step.outEvents»
-						«ASSERT_TRUE»(«componentClassName.toFirstLower».get«outEvent.port.name.toFirstUpper»().isRaised«outEvent.event.name.toFirstUpper»());
-						«IF outEvent.arguments.head !== null»
-							// Parameter value check
-							«ASSERT_EQUALS»(«outEvent.arguments.head.serialize», «componentClassName.toFirstLower».get«outEvent.port.name.toFirstUpper»().get«outEvent.event.name.toFirstUpper»Value());
-						«ENDIF»
+						«ASSERT_TRUE»(«componentClassName.toFirstLower».isRaisedEvent("«outEvent.port.name»", "«outEvent.event.name»", new Object[] {«FOR parameter : outEvent.arguments BEFORE " " SEPARATOR ", " AFTER " "»«parameter.serialize»«ENDFOR»}));
 					«ENDFOR»
 					// Checking variables
 					«FOR variableState : step.instanceStates.filter(InstanceVariableState)»
-						«ASSERT_TRUE»(«componentClassName.toFirstLower».«variableState.instance.getFullContainmentHierarchy(null)».getInterface().get«variableState.declaration.name.toFirstUpper»() == «variableState.value.serialize»);
+						«ASSERT_TRUE»(«componentClassName.toFirstLower».«variableState.instance.getFullContainmentHierarchy(null)».checkVariableValue("«variableState.declaration.name»", «variableState.value.serialize»));
 					«ENDFOR»
 					// Checking of states
 					«FOR instanceState : step.instanceStates.filter(InstanceStateConfiguration).filter[it.state.handled].sortBy[it.instance.name + it.state.name]»
-						«ASSERT_TRUE»(«componentClassName.toFirstLower».«instanceState.instance.getFullContainmentHierarchy(null)».isStateActive(«instanceState.instance.yakinduStatePackageName».«instanceState.state.fullContainmentHierarchy»));
+						«ASSERT_TRUE»(«componentClassName.toFirstLower».«instanceState.instance.getFullContainmentHierarchy(null)».isStateActive("«instanceState.state.parentRegion.name»", "«instanceState.state.name»"));
 					«ENDFOR»
 				}
 				
@@ -178,7 +188,7 @@ class TestGenerator {
 	}
 	
 	protected def dispatch serialize(RaiseEventAct raiseEvent) '''
-		«componentClassName.toFirstLower».get«raiseEvent.port.name.toFirstUpper»().raise«raiseEvent.event.name.toFirstUpper»(«FOR param : raiseEvent.arguments SEPARATOR ", "»«param.serialize»«ENDFOR»);
+		«componentClassName.toFirstLower».raiseEvent("«raiseEvent.port.name»", "«raiseEvent.event.name»", new Object[] {«FOR param : raiseEvent.arguments BEFORE " " SEPARATOR ", " AFTER " "»«param.serialize»«ENDFOR»});
 	'''
 	
 	protected def dispatch serialize(TimeElapse elapse) '''
@@ -186,32 +196,13 @@ class TestGenerator {
 	'''
 	
 	protected def dispatch serialize(InstanceSchedule schedule) '''
-		«componentClassName.toFirstLower».«schedule.scheduledInstance.getFullContainmentHierarchy(null)».schedule();
+		«componentClassName.toFirstLower».«schedule.scheduledInstance.getFullContainmentHierarchy(null)».schedule(null);
 	'''
 	
 	protected def dispatch serialize(ComponentSchedule schedule) '''
-		«IF component instanceof SynchronousComponent»
-			«componentClassName.toFirstLower».runCycle();
-		«ELSE»
-«««			Synch Wrapper
-			«componentClassName.toFirstLower».schedule();
-		«ENDIF»
+«««		In theory only asynchronous adapters and synchronous adapters are used
+		«componentClassName.toFirstLower».schedule(null);
 	'''
-	
-	protected def CharSequence getFullContainmentHierarchy(State state) {
-		if (state === null) {
-			return ""
-		}
-		val parentRegion = state.eContainer as Region
-		var State parentState
-		if (parentRegion.eContainer instanceof State) {
-			parentState = parentRegion.eContainer as State
-		}
-		if (parentState === null) {
-			return parentRegion.name + "_" + state.name
-		}
-		return parentState.fullContainmentHierarchy + "_" + parentRegion.name + "_" + state.name
-	}
 	
 	protected def getParent(ComponentInstance instance) {
 		checkArgument(instance !== null, "The instance is a null value.")
@@ -232,7 +223,7 @@ class TestGenerator {
 	}
 	
 	/**
-	 * Instance names in the model contain the contaiment hierarchy from the root.
+	 * Instance names in the model contain the containment hierarchy from the root.
 	 * Instances in the generated do not, therefore the deletion of containment hierarchy is needed during test-generation.
 	 */
 	protected def getLocalName(ComponentInstance instance) {
@@ -267,13 +258,13 @@ class TestGenerator {
 			}
 			if (component instanceof AsynchronousAdapter) {
 				// This is the end
-				return '''get«(component as AsynchronousAdapter).wrappedComponent.name.toFirstUpper»().'''
+				return '''getComponent("«component.wrappedComponent.name»").'''
 			}
 			if  (component instanceof AsynchronousCompositeComponent) {
 				if (child instanceof SynchronousComponentInstance) {
 					// We are on the border of async-sync components
 					val wrapperInstance = child.asyncParent
-					return '''«wrapperInstance.getFullContainmentHierarchy(child)»get«child.localName.toFirstUpper»().'''
+					return '''«wrapperInstance.getFullContainmentHierarchy(child)»getComponent("«child.localName»").'''
 				}
 				else {
 					// We are on the top of async components
@@ -286,9 +277,9 @@ class TestGenerator {
 			if (child === null) {
 				// No dot after the last instance
 				// Local names are needed to form parent_actual names
-				return '''«parent.getFullContainmentHierarchy(actual)»get«actual.localName.toFirstUpper»()'''	
+				return '''«parent.getFullContainmentHierarchy(actual)»getComponent("«actual.localName»")'''	
 			}
-			return '''«parent.getFullContainmentHierarchy(actual)»get«actual.localName.toFirstUpper»().'''
+			return '''«parent.getFullContainmentHierarchy(actual)»getComponent("«actual.localName»").'''
 		}	
 	}
 	

@@ -11,10 +11,13 @@
 package hu.bme.mit.gamma.uppaal.backannotation
 
 import hu.bme.mit.gamma.expression.model.BooleanTypeDefinition
-import hu.bme.mit.gamma.expression.model.ExpressionModelFactory
+import hu.bme.mit.gamma.expression.model.EnumerationTypeDefinition
 import hu.bme.mit.gamma.expression.model.Expression
+import hu.bme.mit.gamma.expression.model.ExpressionModelFactory
 import hu.bme.mit.gamma.expression.model.IntegerTypeDefinition
 import hu.bme.mit.gamma.expression.model.ParameterDeclaration
+import hu.bme.mit.gamma.expression.model.Type
+import hu.bme.mit.gamma.expression.model.TypeReference
 import hu.bme.mit.gamma.statechart.model.Package
 import hu.bme.mit.gamma.statechart.model.Port
 import hu.bme.mit.gamma.statechart.model.State
@@ -47,8 +50,6 @@ import hu.bme.mit.gamma.uppaal.backannotation.patterns.Traces
 import hu.bme.mit.gamma.uppaal.backannotation.patterns.VariableDelcarations
 import hu.bme.mit.gamma.uppaal.backannotation.patterns.VariableToEvent
 import hu.bme.mit.gamma.uppaal.transformation.traceability.G2UTrace
-import java.io.BufferedReader
-import java.io.StringReader
 import java.math.BigInteger
 import java.util.AbstractMap.SimpleEntry
 import java.util.ArrayList
@@ -57,6 +58,7 @@ import java.util.HashSet
 import java.util.LinkedList
 import java.util.Map
 import java.util.Map.Entry
+import java.util.Scanner
 import java.util.regex.Pattern
 import org.eclipse.emf.ecore.EObject
 import org.eclipse.emf.ecore.resource.ResourceSet
@@ -74,12 +76,15 @@ import static com.google.common.base.Preconditions.checkState
 
 class StringTraceBackAnnotator {
 	
+	protected final String ERROR_CONST = "[error]"
+	protected final String WARNING_CONST = "[warning]"
+	
 	protected final String STATE_CONST_PREFIX = "State"
 	protected final String STATE_CONST = "State:"
 	protected final String TRANSITIONS_CONST = "Transitions:"
 	protected final String DELAY_CONST = "Delay:" 
 	
-	protected final String stringUppaalTrace
+	protected final Scanner traceScanner
 	
 	protected final ResourceSet resourceSet
 	protected final ViatraQueryEngine engine
@@ -90,22 +95,23 @@ class StringTraceBackAnnotator {
 	protected final extension ExpressionModelFactory cntFact = ExpressionModelFactory.eINSTANCE
 	protected final extension TraceFactory trFact = TraceFactory.eINSTANCE
 
-	new(ResourceSet resourceSet, String stringUppaalTrace) {
-//		val fileWriter = new FileWriter("F:\\eclipse_ws\\gamma_dev\\runtime-EclipseXtext\\hu.bme.mit.gamma.tutorial\\model\\trace.txt")
-//		fileWriter.write(stringUppaalTrace)
-//		fileWriter.flush
-//		fileWriter.close		
-//		println(stringUppaalTrace)
-		this.stringUppaalTrace = stringUppaalTrace
+	new(ResourceSet resourceSet, Scanner traceScanner) {
+//		val fileWriter = new FileWriter("C:\\Users\\B\\eclipse_ws\\gamma_2.2_os_ws\\runtime-EclipseXtext\\hu.bme.mit.gamma.prolan.orion\\trace1.txt")
+//		while (traceScanner.hasNext) {
+//			fileWriter.write(traceScanner.nextLine + System.lineSeparator)
+//			fileWriter.flush
+//		}
+//		fileWriter.close
+		this.traceScanner = traceScanner
 		this.resourceSet = resourceSet
 		this.resourceSet.loadModels
-		this.engine = ViatraQueryEngine.on(new EMFScope(this.resourceSet))	
+		this.engine = ViatraQueryEngine.on(new EMFScope(this.resourceSet))
 	}
 
 	/**
 	 * Creates the Trace model.
 	 */
-	def ExecutionTrace execute() {
+	def ExecutionTrace execute() throws EmptyTraceException {
 		// Creating the trace component
 		val trace = createExecutionTrace => [
 			it.component = this.component
@@ -129,12 +135,18 @@ class StringTraceBackAnnotator {
 		// Actual step into we collect the actions
 		var step = createStep
 		
-		val reader = new BufferedReader(new StringReader(stringUppaalTrace))
 		var String line = null
 		var state = BackAnnotatorState.INITIAL
-		while ((line = reader.readLine) !== null) {
+		while (traceScanner.hasNext) {
+			line = traceScanner.nextLine
 			// Variable line contains a single line from the trace
 			switch (line) {
+				case line.contains(ERROR_CONST):
+					// If the condition is not well formed, an exception is thrown
+					throw new IllegalArgumentException("Error in the trace: " + line)
+				case line.contains(WARNING_CONST): {
+					// No operation
+				}
 				case STATE_CONST_PREFIX: // There is a bug where State is written instead of State:
 					state = BackAnnotatorState.STATE_LOCATIONS
 				case STATE_CONST:
@@ -151,6 +163,9 @@ class StringTraceBackAnnotator {
 				default:
 					// This is the place for the parsing
 					switch (state) {
+						case BackAnnotatorState.INITIAL: {
+							// Staying in this state
+						}
 						case BackAnnotatorState.STATE_LOCATIONS: {
 							lastActiveLocations = parseLocations(line)
 							state = BackAnnotatorState.STATE_VARIABLES					
@@ -189,6 +204,10 @@ class StringTraceBackAnnotator {
 			}
 		}
 		if (isFirstStep) {
+			if (lastActiveLocations === null && variableCollection === null) {
+				// Empty trace, no proof or counterexample
+				throw new EmptyTraceException
+			}
 			// In this case not a single step has been executed
 			val firstStep = createStep
 			firstStep.parseOutActions(lastActiveLocations, variableCollection)
@@ -242,6 +261,15 @@ class StringTraceBackAnnotator {
 			return null
 		}
 		val paramType = event.parameterDeclarations.head.type
+		return paramType.createLiteral(parameter)
+	}
+	
+	protected def createVariableLiteral(hu.bme.mit.gamma.expression.model.VariableDeclaration variable, Integer parameter) {
+		val type = variable.type
+		return type.createLiteral(parameter)
+	}
+	
+	private def createLiteral(Type paramType, Integer parameter) {
 		val literal = switch (paramType) {
 			IntegerTypeDefinition: createIntegerLiteralExpression => [it.value = BigInteger.valueOf(parameter)]
 			BooleanTypeDefinition: {
@@ -252,6 +280,18 @@ class StringTraceBackAnnotator {
 					createTrueExpression
 				}
 			}
+			TypeReference: {
+				val typeDeclaration = paramType.reference
+				val type = typeDeclaration.type
+				switch (type) {
+					EnumerationTypeDefinition:
+						return createEnumerationLiteralExpression => [ it.reference = type.literals.get(parameter) ]				
+					default: 
+						throw new IllegalArgumentException("Not known type definition: " + type)
+				}
+			}
+			default: 
+				throw new IllegalArgumentException("Not known type: " + paramType)
 		}
 		return literal
 	}
@@ -285,6 +325,15 @@ class StringTraceBackAnnotator {
 	protected def addOutEvent(Step step, Port port, Event event, Integer parameter) {
 		val eventRaise = createRaiseEventAct(port, event, parameter)
 		step.outEvents += eventRaise
+	}
+	
+	protected def addInstanceVariableState(Step step, SynchronousComponentInstance instance,
+			hu.bme.mit.gamma.expression.model.VariableDeclaration variable,	Expression value) {
+		step.instanceStates += createInstanceVariableState => [
+			it.instance = instance
+			it.declaration = variable
+			it.value = value
+		]
 	}
 	
 	protected def addInstanceState(Step step, SynchronousComponentInstance instance, State state) {
@@ -370,46 +419,56 @@ class StringTraceBackAnnotator {
 			if (event === null) {
 				// Not an event, it might be a valueof
 				val params = uppaalVariable.allValuesOfFrom.filter(ParameterDeclaration) // These variables are traced to ParameterDeclarations only (and not events)
-					// Checking whether the variable is a parameter variable: valueOf variable					
-					if (params.size == 1) {
-						val paramedEvent = params.head.eContainer as Event // Getting the container Event of the ParameterDeclaration
-						// Getting the composite system Port bound to the instance port (Uppaal variables contain the port name on which the event is raised)
-						val matches = TopSyncSystemOutEvents.Matcher.on(engine).getAllMatches(null, null, uppaalVariable.owner, uppaalVariable.port, paramedEvent)
-						if (matches.size > 0) {
-							checkState(matches.size == 1, matches)
-							val match = matches.head
-							// Getting the valueof Uppaal variable
-							val uppaalVars = paramedEvent.allValuesOfTo.filter(DataVariableDeclaration).filter[it.owner == uppaalVariable.owner]
-												.filter[it.variable.head.name == paramedEvent.getOutEventName(uppaalVariable.port, uppaalVariable.owner)] // Connected to isRaised variable
-							if (uppaalVars.size != 1) {
-								throw new IllegalArgumentException("Not one uppaal variable from parameter: " + paramedEvent.name + " " + uppaalVars)
+				// Checking whether the variable is a parameter variable: valueOf variable					
+				if (params.size == 1) {
+					val paramedEvent = params.head.eContainer as Event // Getting the container Event of the ParameterDeclaration
+					// Getting the composite system Port bound to the instance port (Uppaal variables contain the port name on which the event is raised)
+					val matches = TopSyncSystemOutEvents.Matcher.on(engine).getAllMatches(null, null, uppaalVariable.owner, uppaalVariable.port, paramedEvent)
+					if (matches.size > 0) {
+						checkState(matches.size == 1, matches)
+						val match = matches.head
+						// Getting the valueof Uppaal variable
+						val uppaalVars = paramedEvent.allValuesOfTo.filter(DataVariableDeclaration).filter[it.owner == uppaalVariable.owner]
+											.filter[it.variable.head.name == paramedEvent.getOutEventName(uppaalVariable.port, uppaalVariable.owner)] // Connected to isRaised variable
+						if (uppaalVars.size != 1) {
+							throw new IllegalArgumentException("Not one uppaal variable from parameter: " + paramedEvent.name + " " + uppaalVars)
+						}
+						val uppaalVar = uppaalVars.head.variable.head
+						// Checking whether the bool event flag is raised (out events have one bool flag)
+						if (variableList.filter[it.key == uppaalVar].head.value >= 1) {
+							val rightValue = variableMap.value
+							val syncPort = match.systemPort
+							val raisedEvent = match.event
+							// Checking if it led out to an async composite system port
+							val asyncMatches = TopAsyncSystemOutEvents.Matcher.on(engine).getAllMatches(null, null, null, syncPort, raisedEvent)
+							if (asyncMatches.size > 1) {
+								throw new IllegalArgumentException("More than one async system event: " + asyncMatches)
 							}
-							val uppaalVar = uppaalVars.head.variable.head
-							// Checking whether the bool event flag is raised (out events have one bool flag)
-							if (variableList.filter[it.key == uppaalVar].head.value >= 1) {
-								val rightValue = variableMap.value
-								val syncPort = match.systemPort
-								val raisedEvent = match.event
-								// Checking if it led out to an async composite system port
-								val asyncMatches = TopAsyncSystemOutEvents.Matcher.on(engine).getAllMatches(null, null, null, syncPort, raisedEvent)
-								if (asyncMatches.size > 1) {
-									throw new IllegalArgumentException("More than one async system event: " + asyncMatches)
-								}
-								if (asyncMatches.size == 1) {
-									// Event is led out to an async system port
-									val asyncPort = asyncMatches.head.systemPort
-									step.addOutEvent(asyncPort, raisedEvent, rightValue)
-								}
-								else if (component instanceof AsynchronousAdapter || component instanceof SynchronousComponent)  {
-									// Event is not led out to an async system port (sync or wrapper component)
-									step.addOutEvent(syncPort, match.event, rightValue)
-								}
+							if (asyncMatches.size == 1) {
+								// Event is led out to an async system port
+								val asyncPort = asyncMatches.head.systemPort
+								step.addOutEvent(asyncPort, raisedEvent, rightValue)
+							}
+							else if (component instanceof AsynchronousAdapter || component instanceof SynchronousComponent)  {
+								// Event is not led out to an async system port (sync or wrapper component)
+								step.addOutEvent(syncPort, match.event, rightValue)
 							}
 						}
 					}
+				}
+				else {
 					// Else it is a regular variable
+					val gammaVariables = uppaalVariable.allValuesOfFrom.filter(hu.bme.mit.gamma.expression.model.VariableDeclaration) // These variables are traced to ParameterDeclarations only (and not events)
+					if (gammaVariables.size == 1) {
+						val gammaVariable = gammaVariables.head
+						val instance = uppaalVariable.owner
+						checkState(variableMap.value !== null)
+						val rhs = gammaVariable.createVariableLiteral(variableMap.value)
+						step.addInstanceVariableState(instance, gammaVariable, rhs)
+					}
+				}
 			}
-			// Next, checking wheter it is an event without parameter (No valueOf) (Valueofs are taken care of in the if branch)
+			// Next, checking whether it is an event without parameter (No valueOf) (ValueOfs are taken care of in the if branch)
 			else if (event.parameterDeclarations.empty) {
 				val matches = TopSyncSystemOutEvents.Matcher.on(engine).getAllMatches(null, null, uppaalVariable.owner, uppaalVariable.port, event)
 				if (matches.size > 0) {
@@ -754,3 +813,4 @@ class StringTraceBackAnnotator {
 }
 
 enum BackAnnotatorState {INITIAL, STATE_LOCATIONS, STATE_VARIABLES, TRANSITIONS, DELAY}
+class EmptyTraceException extends Exception {}

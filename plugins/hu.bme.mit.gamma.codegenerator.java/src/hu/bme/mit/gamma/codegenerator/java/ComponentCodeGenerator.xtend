@@ -10,8 +10,8 @@ import java.util.HashSet
 
 class ComponentCodeGenerator {
 	
-	final extension EventDeclarationHandler gammaEventDeclarationHandler
-	final extension TypeTransformer typeTransformer
+	protected final extension EventDeclarationHandler gammaEventDeclarationHandler
+	protected final extension TypeTransformer typeTransformer
 	
 	new(Trace trace) {
 		this.gammaEventDeclarationHandler = new EventDeclarationHandler(trace)
@@ -27,6 +27,14 @@ class ComponentCodeGenerator {
 			private final «parameter.type.transformType» «parameter.name»;
 		«ENDFOR»
 	'''
+	
+	/** 
+	 * Returns all events of the given ports that go in the given direction through the port.
+	 */
+	protected def getSemanticEvents(Port port, EventDirection direction) {
+		return #[port].getSemanticEvents(direction)
+	}
+	
 	
 	/** 
 	 * Returns all events of the given ports that go in the given direction through the ports.

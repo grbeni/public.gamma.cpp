@@ -16,15 +16,14 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.io.StringReader;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Scanner;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
@@ -52,12 +51,14 @@ import hu.bme.mit.gamma.querygenerator.patterns.InstanceVariables;
 import hu.bme.mit.gamma.querygenerator.patterns.SimpleInstances;
 import hu.bme.mit.gamma.querygenerator.patterns.SimpleStatechartStates;
 import hu.bme.mit.gamma.querygenerator.patterns.SimpleStatechartVariables;
+import hu.bme.mit.gamma.querygenerator.patterns.StatesToLocations;
 import hu.bme.mit.gamma.querygenerator.patterns.Subregions;
 import hu.bme.mit.gamma.statechart.model.Region;
 import hu.bme.mit.gamma.statechart.model.State;
 import hu.bme.mit.gamma.trace.language.ui.internal.LanguageActivator;
 import hu.bme.mit.gamma.trace.language.ui.serializer.TraceLanguageSerializer;
 import hu.bme.mit.gamma.trace.model.ExecutionTrace;
+import hu.bme.mit.gamma.uppaal.backannotation.EmptyTraceException;
 import hu.bme.mit.gamma.uppaal.backannotation.StringTraceBackAnnotator;
 import hu.bme.mit.gamma.uppaal.backannotation.TestGenerator;
 
@@ -67,9 +68,10 @@ public class Controller {
 	
 	private View view;
 	
-	@SuppressWarnings("unused")
 	private ResourceSet resourceSet;
 	private ViatraQueryEngine engine;
+	private ResourceSet traceabilitySet;
+	private ViatraQueryEngine traceEngine;
 	// Indicates the actual verification process
 	private volatile Verifier verifier;
 	// Indicates the actual test generation process
@@ -85,12 +87,15 @@ public class Controller {
 	private final String TRACE_FOLDER_NAME = "trace";
 	
 	public Controller(View view, ResourceSet resourceSet, IFile file, boolean needsBackAnnotation) throws ViatraQueryException {
+		this.file = file;
 		this.view = view;
 		this.resourceSet = resourceSet;
 		logger.log(Level.INFO, "Resource set content for displaying model elements on GUI: " + resourceSet);
-		engine = ViatraQueryEngine.on(new EMFScope(resourceSet));
+		this.traceabilitySet = loadTraceability(); // For state-location
+		logger.log(Level.INFO, "Traceability resource set content: " + traceabilitySet);
+		this.engine = ViatraQueryEngine.on(new EMFScope(this.resourceSet));
+		this.traceEngine = ViatraQueryEngine.on(new EMFScope(this.traceabilitySet));
 		this.needsBackAnnotation = needsBackAnnotation;
-		this.file = file;
 	}
 	
 	public void initSelectorWithStates(JComboBox<String> selector) throws ViatraQueryException {
@@ -116,7 +121,7 @@ public class Controller {
 		}
 		fillComboBox(selector, entryList);
 	}
-
+	
 	public void initSelectorWithVariables(JComboBox<String> selector) throws ViatraQueryException {
 		// Needed to ensure the items in the selector are sorted
 		List<String> entryList = new ArrayList<String>();
@@ -189,7 +194,6 @@ public class Controller {
 		return fullParentRegionPathName + "." + lowestRegion.getName(); // Only regions are in path - states could be added too
 	}
 	
-	
 	public String parseRegular(String text, String operator) throws ViatraQueryException {
 		String result = text;
 		List<String> stateNames = this.getStateNames();
@@ -240,11 +244,22 @@ public class Controller {
 					null, splittedStateName[splittedStateName.length - 1] /* state */)) {
 				Region parentRegion = match.getParentRegion();
 				String templateName = "P_" + getRegionName(parentRegion) + "Of" + splittedStateName[0] /* instance name */;
-				String locationName = templateName +  "." + splittedStateName[splittedStateName.length - 1] /* state name */;
-				if (isSubregion(parentRegion)) {
-					locationName += " && " + templateName + ".isActive"; 
+				StringBuilder locationNames = new StringBuilder("(");
+				for (String locationName : StatesToLocations.Matcher.on(traceEngine).getAllValuesOflocationName(match.getState().getName())) {
+					String templateLocationName = templateName +  "." + locationName;
+					if (locationNames.length() == 1) {
+						// First append
+						locationNames.append(templateLocationName);
+					}
+					else {
+						locationNames.append(" || " + templateLocationName);
+					}
 				}
-				return locationName;
+				locationNames.append(")");
+				if (isSubregion(parentRegion)) {
+					locationNames.append(" && " + templateName + ".isActive"); 
+				}
+				return locationNames.toString();
 			}
 		}
 		else {
@@ -280,7 +295,6 @@ public class Controller {
 	
 	/**
      * Returns the template name of a region.
-	 * @throws ViatraQueryException 
      */
     private String getRegionName(Region region) throws ViatraQueryException {
     	String templateName;
@@ -379,16 +393,6 @@ public class Controller {
 		}
 		return file;
 	}
-
-	private String readFromStream(InputStream ips) throws IOException {
-		String line;
-		StringBuilder text = new StringBuilder();
-		BufferedReader bf = new BufferedReader(new InputStreamReader(ips));
-		while ((line = bf.readLine()) != null) {
-			text.append(line + System.lineSeparator());
-		}
-		return text.toString();
-	}
 	
 	private ResourceSet loadTraceability() {
 		ResourceSet resSet = new ResourceSetImpl();
@@ -434,22 +438,6 @@ public class Controller {
 		Thread thread = new Thread(generatedTestVerifier);
     	thread.start();
     }
-    
-	private String deleteWarningLines(String trace) {
-		StringBuilder builder = new StringBuilder();
-		try (BufferedReader reader = new BufferedReader(new StringReader(trace))) {
-			String line = null;
-			while ((line = reader.readLine()) != null) {
-				if (!line.contains("[warning]")) {
-					builder.append(line + System.lineSeparator());
-				}
-			}
-			return builder.toString();
-		} catch (IOException e) {
-			e.printStackTrace();
-			return null;
-		}
-	}
 	
 	private String getParameters() {
 		return getSearchOrder() + " " + getDiagnosticTrace() + " " + getHashtableSize() + " " +
@@ -535,6 +523,7 @@ public class Controller {
 		
 		@Override
 		public ThreeStateBoolean doInBackground() throws Exception {
+			Scanner traceReader = null;
 			try {
 				// Disabling the verification buttons
 				view.setVerificationButtons(false);
@@ -549,39 +538,30 @@ public class Controller {
 				process = Runtime.getRuntime().exec(command.toString());
 				InputStream ips = process.getErrorStream();
 				// Reading the result of the command
-				String rawTrace = readFromStream(ips); // This is where the thread block
+				traceReader = new Scanner(ips);
 				if (isCancelled) {
 					// If the process is killed, this is where it can be checked
 					return ThreeStateBoolean.UNDEF;
 				}
-				if (rawTrace.isEmpty()) {
+				if (!traceReader.hasNext()) {
 					// No back annotation of empty lines
 					return handleEmptyLines(uppaalQuery);
-				}
-				// If the condition is not well formed, an exception is thrown
-				if (rawTrace.contains("[error]")) {
-					throw new IllegalArgumentException(rawTrace);
-				}
-				String trace = deleteWarningLines(rawTrace);
-				if (trace.isEmpty()) {
-					// No back annotation of empty lines
-					return handleEmptyLines(uppaalQuery);
-				}
-				if (!needsBackAnnotation) {
-					// If back-annotation is not needed, we return
-					return handleEmptyLines(uppaalQuery).opposite();
 				}
 				// Warning lines are now deleted if there was any
 				ResourceSet traceabilitySet = loadTraceability(); // For back-annotation
 				logger.log(Level.INFO, "Resource set content for string trace back-annotation: " + traceabilitySet);
-				StringTraceBackAnnotator backAnnotator = new StringTraceBackAnnotator(traceabilitySet, trace);
+				StringTraceBackAnnotator backAnnotator = new StringTraceBackAnnotator(traceabilitySet, traceReader);
 				ExecutionTrace traceModel = backAnnotator.execute();
+				if (!needsBackAnnotation) {
+					// If back-annotation is not needed, we return after checking if it is an empty trace (watching out for warning lines)
+					return handleEmptyLines(uppaalQuery).opposite();
+				}
 				Entry<String, Integer> fileNameAndId = getFileName("get"); // File extension could be gtr or get		
 				fileNameAndId = saveModel(traceModel, fileNameAndId);
 				// Have to be the SAME resource set as before (traceabilitySet) otherwise the trace model contains references to dead objects
+				String packageName = file.getProject().getName().toLowerCase();
 				TestGenerator testGenerator = new TestGenerator(traceabilitySet,
-					traceModel, file.getProject().getName(),
-					"ExecutionTraceSimulation" + fileNameAndId.getValue());
+					traceModel, packageName, "ExecutionTraceSimulation" + fileNameAndId.getValue());
 				String testClassCode = testGenerator.execute();
 				String testClassParentFolder = getTestGentFolder() + "/" + 
 						testGenerator.getPackageName().replaceAll("\\.", "\\/");
@@ -590,6 +570,8 @@ public class Controller {
 				logger.log(Level.INFO, "Test generation has been finished.");
 				// There is a generated trace, so the result is the opposite of the empty trace
 				return handleEmptyLines(uppaalQuery).opposite();
+			} catch (EmptyTraceException e) {
+				return handleEmptyLines(uppaalQuery);
 			} catch (NullPointerException e) {
 				e.printStackTrace();
 				throw new IllegalArgumentException("Error! The generated UPPAAL file cannot be found.");
@@ -599,6 +581,8 @@ public class Controller {
 				IllegalArgumentException ex = new IllegalArgumentException("Error! " + e.getMessage());
 				ex.initCause(e);
 				throw ex;
+			} finally {
+				traceReader.close();
 			}
 		}
 
@@ -609,7 +593,7 @@ public class Controller {
 				serialize(traceModel, getTraceFolder(), fileNameAndId.getKey());
 			} catch (Exception e) {
 				logger.log(Level.SEVERE, e.getMessage() + System.lineSeparator() +
-						"Possibly you have two more model elements with the same name specified in the previous error message.");
+					"Possibly you have two more model elements with the same name specified in the previous error message.");
 				new File(getTraceFolder() + File.separator + fileNameAndId.getKey()).delete();
 				// Saving like an EMF model
 				fileNameAndId = getFileName("gtr");

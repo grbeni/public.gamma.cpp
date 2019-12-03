@@ -13,9 +13,11 @@ package hu.bme.mit.gamma.codegenerator.java
 import hu.bme.mit.gamma.codegenerator.java.queries.AbstractSynchronousCompositeComponents
 import hu.bme.mit.gamma.codegenerator.java.queries.AsynchronousCompositeComponents
 import hu.bme.mit.gamma.codegenerator.java.queries.Interfaces
+import hu.bme.mit.gamma.codegenerator.java.queries.SimpleGammaComponents
 import hu.bme.mit.gamma.codegenerator.java.queries.SimpleYakinduComponents
 import hu.bme.mit.gamma.codegenerator.java.queries.SynchronousComponentWrappers
 import hu.bme.mit.gamma.statechart.model.Package
+import hu.bme.mit.gamma.statechart.model.StatechartDefinition
 import hu.bme.mit.gamma.statechart.model.composite.Component
 import java.io.File
 import java.io.FileWriter
@@ -59,9 +61,10 @@ class GlueCodeGenerator {
 	protected final extension TimerServiceCodeGenerator timerServiceCodeGenerator
 	protected final extension PortInterfaceGenerator portInterfaceGenerator
 	protected final extension ComponentInterfaceGenerator componentInterfaceGenerator
+	protected final extension ReflectiveComponentCodeGenerator reflectiveComponentCodeGenerator
 	protected final extension StatechartWrapperCodeGenerator statechartWrapperCodeGenerator
 	protected final extension SynchronousCompositeComponentCodeGenerator synchronousCompositeComponentCodeGenerator
-	protected final extension SynchronousComponentWrapperCodeGenerator synchronousComponentWrapperCodeGenerator
+	protected final extension AsynchronousAdapterCodeGenerator synchronousComponentWrapperCodeGenerator
 	protected final extension ChannelInterfaceGenerator channelInterfaceGenerator
 	protected final extension ChannelCodeGenerator channelCodeGenerator
 	protected final extension AsynchronousCompositeComponentCodeGenerator asynchronousCompositeComponentCodeGenerator
@@ -69,6 +72,7 @@ class GlueCodeGenerator {
 	// Transformation rules
 	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> portInterfaceRule
 	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> simpleComponentsRule
+	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> simpleComponentsReflectionRule
 	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> synchronousCompositeComponentsRule
 	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> synchronousComponentWrapperRule
 	protected BatchTransformationRule<? extends IPatternMatch, ? extends ViatraQueryMatcher<?>> channelsRule
@@ -93,9 +97,10 @@ class GlueCodeGenerator {
 		this.timerServiceCodeGenerator = new TimerServiceCodeGenerator(this.BASE_PACKAGE_NAME)
 		this.portInterfaceGenerator  = new PortInterfaceGenerator(this.BASE_PACKAGE_NAME, trace)
 		this.componentInterfaceGenerator = new ComponentInterfaceGenerator(this.BASE_PACKAGE_NAME)
+		this.reflectiveComponentCodeGenerator = new ReflectiveComponentCodeGenerator(this.BASE_PACKAGE_NAME, trace)
 		this.statechartWrapperCodeGenerator = new StatechartWrapperCodeGenerator(this.BASE_PACKAGE_NAME, this.YAKINDU_PACKAGE_NAME, trace)
 		this.synchronousCompositeComponentCodeGenerator = new SynchronousCompositeComponentCodeGenerator(this.BASE_PACKAGE_NAME, this.YAKINDU_PACKAGE_NAME, trace)
-		this.synchronousComponentWrapperCodeGenerator = new SynchronousComponentWrapperCodeGenerator(this.BASE_PACKAGE_NAME, trace)
+		this.synchronousComponentWrapperCodeGenerator = new AsynchronousAdapterCodeGenerator(this.BASE_PACKAGE_NAME, trace)
 		this.channelInterfaceGenerator = new ChannelInterfaceGenerator(this.BASE_PACKAGE_NAME)
 		this.channelCodeGenerator = new ChannelCodeGenerator(this.BASE_PACKAGE_NAME)
 		this.asynchronousCompositeComponentCodeGenerator = new AsynchronousCompositeComponentCodeGenerator(this.BASE_PACKAGE_NAME, trace)
@@ -138,10 +143,12 @@ class GlueCodeGenerator {
 		checkUniqueInterfaceNames
 		generateEventClass
 		if (topComponent.needTimer) {				
-			// Virtual timer is generated only if there are timing specs (triggers) in the model
+			// Virtual timer is generated only if there are timing specifications (triggers) in the model
 			generateTimerClasses	
 		}	
 		getPortInterfaceRule.fireAllCurrent
+		generateReflectiveInterfaceRule
+		getSimpleComponentReflectionRule.fireAllCurrent
 		getSimpleComponentDeclarationRule.fireAllCurrent
 		getSynchronousCompositeComponentsRule.fireAllCurrent
 		if (hasSynchronousWrapper) {
@@ -226,6 +233,28 @@ class GlueCodeGenerator {
 		return portInterfaceRule
 	}
 	
+	protected def generateReflectiveInterfaceRule() {
+		val interfaceUri = BASE_PACKAGE_URI
+		val reflectiveCode = generateReflectiveInterface
+		reflectiveCode.saveCode(interfaceUri + File.separator + Namings.REFLECTIVE_INTERFACE + ".java")
+	}
+	
+	
+	/**
+	 * Creates a reflective Java class for each Gamma component.
+	 */
+	protected def getSimpleComponentReflectionRule() {
+		if (simpleComponentsReflectionRule === null) {
+			 simpleComponentsReflectionRule = createRule(SimpleGammaComponents.instance).action [
+				val componentUri = BASE_PACKAGE_URI + File.separator  + it.statechartDefinition.containingPackage.name.toLowerCase
+				// Generating the reflective class
+				val reflectiveCode = it.statechartDefinition.generateReflectiveClass
+				reflectiveCode.saveCode(componentUri + File.separator + it.statechartDefinition.generateReflectiveComponentClassName + ".java")
+			].build		
+		}
+		return simpleComponentsReflectionRule
+	}
+	
 	/**
 	 * Creates a Java class for each component transformed from Yakindu given in the component model.
 	 */
@@ -233,7 +262,7 @@ class GlueCodeGenerator {
 		if (simpleComponentsRule === null) {
 			 simpleComponentsRule = createRule(SimpleYakinduComponents.instance).action [
 				val componentUri = BASE_PACKAGE_URI + File.separator  + it.statechartDefinition.containingPackage.name.toLowerCase
-				val code = it.statechartDefinition.createSimpleComponentClass
+				val code = (it.statechartDefinition as StatechartDefinition).createSimpleComponentClass
 				code.saveCode(componentUri + File.separator + it.statechartDefinition.generateComponentClassName + ".java")
 				// Generating the interface for returning the Ports
 				val interfaceCode = it.statechartDefinition.generateComponentInterface
@@ -252,6 +281,9 @@ class GlueCodeGenerator {
 				// Generating the interface that is able to return the Ports
 				val interfaceCode = it.synchronousCompositeComponent.generateComponentInterface
 				interfaceCode.saveCode(compositeSystemUri + File.separator + it.synchronousCompositeComponent.generatePortOwnerInterfaceName + ".java")
+				// Generating the reflective class
+				val reflectiveCode = it.synchronousCompositeComponent.generateReflectiveClass
+				reflectiveCode.saveCode(compositeSystemUri + File.separator + it.synchronousCompositeComponent.generateReflectiveComponentClassName + ".java")
 			].build		
 		}
 		return synchronousCompositeComponentsRule
@@ -270,7 +302,7 @@ class GlueCodeGenerator {
 		if (synchronousComponentWrapperRule === null) {
 			 synchronousComponentWrapperRule = createRule(SynchronousComponentWrappers.instance).action [
 				val compositeSystemUri = BASE_PACKAGE_URI + File.separator + it.synchronousComponentWrapper.containingPackage.name.toLowerCase
-				val code = it.synchronousComponentWrapper.createSynchronousComponentWrapperClass
+				val code = it.synchronousComponentWrapper.createAsynchronousAdapterClass
 				code.saveCode(compositeSystemUri + File.separator + it.synchronousComponentWrapper.generateComponentClassName + ".java")
 				val interfaceCode = it.synchronousComponentWrapper.generateComponentInterface
 				interfaceCode.saveCode(compositeSystemUri + File.separator + it.synchronousComponentWrapper.generatePortOwnerInterfaceName + ".java")

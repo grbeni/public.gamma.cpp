@@ -8,7 +8,7 @@ import hu.bme.mit.gamma.statechart.model.interface_.Interface
 
 class NameGenerator {
 
-	final String PACKAGE_NAME
+	protected final String PACKAGE_NAME
 
 	new(String packageName) {
 		this.PACKAGE_NAME = packageName
@@ -41,10 +41,17 @@ class NameGenerator {
 	}
 	
 	/**
-	 * Returns the name of the Java class of the component (the Yakindu statemachine wrapper).
+	 * Returns the name of the Java class of the component.
 	 */
 	def generateComponentClassName(Component component) {
 		return component.name.toFirstUpper
+	}
+	
+	/**
+	 * Returns the name of the Java class of the component.
+	 */
+	def generateReflectiveComponentClassName(Component component) {
+		return "Reflective" + component.name.toFirstUpper
 	}
 		
 	/**
@@ -91,7 +98,7 @@ class NameGenerator {
 	/**
 	 * Returns the type name of the interface of the wrapped Yakindu statemachine.
 	 */
-	protected def getYakinduRealizationModeName(Port port) {
+	protected def getYakinduInterfaceName(Port port) {
 		 if (port.name === null) {
 		 	return "SCInterface"
 		 }
