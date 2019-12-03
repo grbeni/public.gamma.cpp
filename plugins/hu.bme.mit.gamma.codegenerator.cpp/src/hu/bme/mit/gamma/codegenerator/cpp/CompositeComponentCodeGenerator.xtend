@@ -107,11 +107,15 @@ class CompositeComponentCodeGenerator {
 		«FOR parameter : component.parameterDeclarations SEPARATOR ", "»
 			this->«parameter.name» = «parameter.name»;
 		«ENDFOR»
-		«FOR instance : component.derivedComponents»
-			«instance.name» = new «instance.derivedType.generateComponentClassName»(«FOR argument : instance.arguments SEPARATOR ", "»«argument.serialize»«ENDFOR»);
-		«ENDFOR»
-		«FOR port : component.portBindings.map[it.compositeSystemPort]»
-			«port.name.toFirstLower» = new «port.name.toFirstUpper»();
+	'''
+	
+	/** Sets the parameters of the component and instantiates the necessary components with them. */
+	def createInitList(CompositeComponent component) '''
+		«FOR instance : component.derivedComponents SEPARATOR ", "»
+			«instance.name»(«instance.derivedType.generateComponentClassName»(«FOR argument : instance.arguments SEPARATOR ", "»«argument.serialize»«ENDFOR»)
+			«ENDFOR»«IF component.derivedComponents.size != 0 && component.portBindings.map[it.compositeSystemPort].size != 0 »,«ENDIF»
+		«FOR port : component.portBindings.map[it.compositeSystemPort] SEPARATOR ", "»
+			«port.name.toFirstLower»(*this)
 		«ENDFOR»
 	'''
 	

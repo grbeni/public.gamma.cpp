@@ -9,6 +9,7 @@ import hu.bme.mit.gamma.statechart.model.composite.SynchronousCompositeComponent
 import hu.bme.mit.gamma.statechart.model.interface_.EventDeclaration
 import hu.bme.mit.gamma.statechart.model.interface_.EventDirection
 import java.util.Collections
+import hu.bme.mit.gamma.statechart.model.composite.CompositeComponent
 
 class SynchronousCompositeComponentCodeGenerator {
 	
@@ -45,6 +46,8 @@ class SynchronousCompositeComponentCodeGenerator {
 		*/
 	    #include <functional>
 	    #include <vector>
+	    #include "../OneThreadedTimer.cpp"
+	    
 	    #include "./«component.generateComponentClassName»Interface.h"
 	    
 	    «var list = newArrayList()»
@@ -147,6 +150,7 @@ class SynchronousCompositeComponentCodeGenerator {
 	  			«ENDFOR»
 	  			«component.generateParameterDeclarationFields»
 		  public:
+		  /*
 			«IF component.needTimer»
 				«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", " AFTER ", "»«parameter.type.transformType» «parameter.name»«ENDFOR»«Namings.UNIFIED_TIMER_INTERFACE» timer) {
 					«component.createInstances»
@@ -154,8 +158,10 @@ class SynchronousCompositeComponentCodeGenerator {
 					init();
 				}
 			«ENDIF»
-			
-			«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", "»«parameter.type.transformType» «parameter.name»«ENDFOR») {
+			*/
+			«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", "»«parameter.type.transformType» «parameter.name»«ENDFOR») :
+				«component.createInitList» {
+				
 				«component.createInstances»
 				init();
 			}
@@ -267,7 +273,8 @@ class SynchronousCompositeComponentCodeGenerator {
 	
 			«IF component.needTimer»
 				/** Setter for the timer e.g., a virtual timer. */
-				void setTimer(«Namings.UNIFIED_TIMER_INTERFACE» timer) {
+				//«Namings.UNIFIED_TIMER_INTERFACE»
+				void setTimer(OneThreadTimer timer) {
 					«FOR instance : component.components»
 						«IF instance.type.needTimer»
 							«instance.name».setTimer(timer);
