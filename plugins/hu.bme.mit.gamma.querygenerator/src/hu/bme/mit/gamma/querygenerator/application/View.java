@@ -312,6 +312,7 @@ public class View extends JFrame {
 					break;
 				case "NEGATION":
 					activeText.setText(activeText.getText() + "!");
+					break;
 				case "EQUALITY":
 					activeText.setText(activeText.getText() + " == ");
 					break;
@@ -396,7 +397,7 @@ public class View extends JFrame {
 			public void actionPerformed(ActionEvent e) {			
 				boolean isCancelled = controller.cancelVerification();
 				if (isCancelled) {
-					verificationResultLabel.setText("Verification cancelled.");
+					setVerificationLabelToCancelled();
 					// We do not want to empty the query labels
 					return;
 				}
@@ -733,6 +734,11 @@ public class View extends JFrame {
 				}
 				break;
 		}
+	}
+	
+	protected void setVerificationLabelToCancelled() {
+		verificationResultLabel.setText("Verification cancelled.");
+		verificationResultLabel.setForeground(Color.black);
 	}
 
 	protected void setVerificationLabelToFalse() {
