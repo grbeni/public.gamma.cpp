@@ -139,19 +139,21 @@ class GlueCodeGenerator {
 		generateEventClass
 		if (topComponent.needTimer) {				
 			// Virtual timer is generated only if there are timing specs (triggers) in the model
-			generateTimerClasses	
+			//generateTimerClasses	
 		}	
 		getPortInterfaceRule.fireAllCurrent
 		getSimpleComponentDeclarationRule.fireAllCurrent
 		getSynchronousCompositeComponentsRule.fireAllCurrent
 		if (hasSynchronousWrapper) {
-			generateLinkedBlockingMultiQueueClasses
+			throw new UnsupportedOperationException
+			//generateLinkedBlockingMultiQueueClasses
 		}
 		getSynchronousComponentWrapperRule.fireAllCurrent
 		if (hasAsynchronousComposite) {
-			getChannelsRule.fireAllCurrent
+			throw new UnsupportedOperationException
+			//getChannelsRule.fireAllCurrent
 		}
-		getAsynchronousCompositeComponentsRule.fireAllCurrent
+		//getAsynchronousCompositeComponentsRule.fireAllCurrent
 	}	
 	
 	/**
@@ -246,9 +248,14 @@ class GlueCodeGenerator {
 	protected def getSynchronousCompositeComponentsRule() {
 		if (synchronousCompositeComponentsRule === null) {
 			 synchronousCompositeComponentsRule = createRule(AbstractSynchronousCompositeComponents.instance).action [
-				val compositeSystemUri = BASE_PACKAGE_URI + File.separator + it.synchronousCompositeComponent.containingPackage.name.toLowerCase
-				val code = it.synchronousCompositeComponent.createSynchronousCompositeComponentClass
+				var compositeSystemUri = BASE_PACKAGE_URI + File.separator + it.synchronousCompositeComponent.containingPackage.name.toLowerCase
+				var code = it.synchronousCompositeComponent.createSynchronousCompositeComponentHeader
+				code.saveCode(compositeSystemUri + File.separator + it.synchronousCompositeComponent.generateComponentClassName + ".h")
+				
+				compositeSystemUri = BASE_PACKAGE_URI + File.separator + it.synchronousCompositeComponent.containingPackage.name.toLowerCase
+				code = it.synchronousCompositeComponent.createSynchronousCompositeComponentClass
 				code.saveCode(compositeSystemUri + File.separator + it.synchronousCompositeComponent.generateComponentClassName + ".cpp")
+				
 				// Generating the interface that is able to return the Ports
 				val interfaceCode = it.synchronousCompositeComponent.generateComponentInterface
 				interfaceCode.saveCode(compositeSystemUri + File.separator + it.synchronousCompositeComponent.generatePortOwnerInterfaceName + ".h")
@@ -295,6 +302,8 @@ class GlueCodeGenerator {
 	}
 	
 	protected def getAsynchronousCompositeComponentsRule() {
+		throw new UnsupportedOperationException
+		/*
 		if (asynchronousCompositeComponentsRule === null) {
 			 asynchronousCompositeComponentsRule = createRule(AsynchronousCompositeComponents.instance).action [
 				val compositeSystemUri = BASE_PACKAGE_URI + File.separator + it.asynchronousCompositeComponent.containingPackage.name.toLowerCase
@@ -306,6 +315,7 @@ class GlueCodeGenerator {
 			].build		
 		}
 		return asynchronousCompositeComponentsRule
+		*/
 	}
 	
 	/**

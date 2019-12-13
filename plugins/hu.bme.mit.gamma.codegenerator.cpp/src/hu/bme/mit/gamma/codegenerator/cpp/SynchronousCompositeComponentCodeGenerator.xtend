@@ -37,27 +37,25 @@ class SynchronousCompositeComponentCodeGenerator {
 	}
 	
 	/**
-	* Creates the C++ code of the synchronous composite class, containing the statemachine instances.
+	* Creates the C++ code of the synchronous composite class headere, containing the statemachine instances.
 	*/
-	protected def createSynchronousCompositeComponentClass(AbstractSynchronousCompositeComponent component) '''
-		//package «component.generateComponentPackageName»;
-		/*
-		«component.generateCompositeSystemImports»
-		*/
-	    #include <functional>
-	    #include <vector>
-	    #include "../OneThreadedTimer.cpp"
-	    
-	    #include "./«component.generateComponentClassName»Interface.h"
-	    
-	    «var list = newArrayList()»
-		«FOR instance : component.components»
-			«IF !list.contains(instance.type.containingPackage.getName.toLowerCase)»
-				#include "../«instance.type.containingPackage.getName.toLowerCase»/«instance.type.generateComponentClassName».cpp"
-				«IF list.add(instance.type.containingPackage.getName.toLowerCase)» «««supress output
-				«ENDIF»
+	protected def createSynchronousCompositeComponentHeader(AbstractSynchronousCompositeComponent component) '''
+    #ifndef «component.generateComponentClassName.toUpperCase»
+    #define «component.generateComponentClassName.toUpperCase»
+    
+    #include <functional>
+    #include <vector>
+    #include "../OneThreadedTimer.h"
+    
+    #include "./«component.generateComponentClassName»Interface.h"
+«var list = newArrayList()»
+	«FOR instance : component.components»
+		«IF !list.contains(instance.type.containingPackage.getName.toLowerCase)»
+			#include "../«instance.type.containingPackage.getName.toLowerCase»/«instance.type.generateComponentClassName».h"
+			«IF list.add(instance.type.containingPackage.getName.toLowerCase)» «««supress output
 			«ENDIF»
-		«ENDFOR»
+		«ENDIF»
+	«ENDFOR»
 	
 		//SynchronousCompositeComponentCode
 		class «component.generateComponentClassName» : public «component.generatePortOwnerInterfaceName» {
@@ -67,7 +65,6 @@ class SynchronousCompositeComponentCodeGenerator {
 			«ENDFOR»
 
 		  public:
-		  		////////////////////
 			// Inner classes representing Ports
 			«FOR portBinding : component.portBindings SEPARATOR "\n"»
 				class «portBinding.compositeSystemPort.name.toFirstUpper» : public «portBinding.compositeSystemPort.interfaceRealization.interface.generateName»::«portBinding.compositeSystemPort.interfaceRealization.realizationMode.toString.toLowerCase.toFirstUpper» {
@@ -142,155 +139,209 @@ class SynchronousCompositeComponentCodeGenerator {
 				}
 			«ENDFOR»
 
-		  		////////////////////
-		  private:
-	  			// Port instances
-	  			«FOR port : component.portBindings.map[it.compositeSystemPort]»
-	  				«port.name.toFirstUpper» «port.name.toFirstLower»;
-	  			«ENDFOR»
-	  			«component.generateParameterDeclarationFields»
-		  public:
-		  /*
-			«IF component.needTimer»
-				«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", " AFTER ", "»«parameter.type.transformType» «parameter.name»«ENDFOR»«Namings.UNIFIED_TIMER_INTERFACE» timer) {
-					«component.createInstances»
-					setTimer(timer);
-					init();
-				}
-			«ENDIF»
-			*/
-			«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", "»«parameter.type.transformType» «parameter.name»«ENDFOR») :
-				«component.createInitList» {
-				
-				«component.createInstances»
-				init();
-			}
-			
-			/** Resets the contained statemachines recursively. Must be called to initialize the component. */
-			
-			void reset() override {
-				«FOR instance : component.components»
-					«instance.name».reset();
-				«ENDFOR»								
-				// Initializing chain of listeners and events 
-				initListenerChain();
-			}
-		  private:
-			/** Creates the channel mappings and enters the wrapped statemachines. */
-			void init() {
-				// Registration of simple channels
-				«FOR channelMatch : SimpleChannels.Matcher.on(engine).getAllMatches(component, null, null, null)»
-					«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»().registerListener(«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»());
-					«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»().registerListener(«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»());
-				«ENDFOR»
-				// Registration of broadcast channels
-				«FOR channelMatch : BroadcastChannels.Matcher.on(engine).getAllMatches(component, null, null, null)»
-					«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»().registerListener(«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»());
-				«ENDFOR»
-				«IF component instanceof CascadeCompositeComponent»
-					// Setting only a single queue for cascade statecharts
-					«FOR instance : component.components.filter[it.type instanceof StatechartDefinition]»
-						«instance.name».change«INSERT_QUEUE.toFirstUpper»();
-					«ENDFOR»
-				«ENDIF»
-			}
+	  private:
+		// Port instances
+		«FOR port : component.portBindings.map[it.compositeSystemPort]»
+			«port.name.toFirstUpper» «port.name.toFirstLower»;
+		«ENDFOR»
+		«component.generateParameterDeclarationFields»
 
-			/** Clears the the boolean flags of all out-events in each contained port. */
-			void clearPorts() {
-				«FOR portBinding : component.portBindings»
-					get«portBinding.compositeSystemPort.name.toFirstUpper»().clear();
-				«ENDFOR»
-			}
-			
-			/** Notifies all registered listeners in each contained port. */
-			void notifyListeners() {
-				«FOR portBinding : component.portBindings»
-					get«portBinding.compositeSystemPort.name.toFirstUpper»().notifyListeners();
-				«ENDFOR»
-			}
-		  public:
-			/** Needed for the right event notification after initialization, as event notification from contained components
-			 * does not happen automatically (see the port implementations and runComponent method). */
-			void initListenerChain() {
-				«FOR instance : component.components.filter[!(it.type instanceof StatechartDefinition)]»
-					«instance.name».initListenerChain();
-				«ENDFOR»
-				notifyListeners();
-			}
-			
-			«IF component instanceof SynchronousCompositeComponent»
-				/** Changes the event and process queues of all component instances. Should be used only be the container (composite system) class. */
-				void change«EVENT_QUEUE.toFirstUpper»s() {
-					«FOR instance : component.components.filter[!(it.type instanceof CascadeCompositeComponent)]»
-						«instance.name».change«EVENT_QUEUE.toFirstUpper»s();
-					«ENDFOR»
-				}
-			«ENDIF»
-			
-			/** Returns whether all event queues of the contained component instances are empty. 
-			Should be used only be the container (composite system) class. */
-			bool is«EVENT_QUEUE.toFirstUpper»Empty() {
-				return «FOR instance : component.components SEPARATOR " && "»«instance.name».is«EVENT_QUEUE.toFirstUpper»Empty()«ENDFOR»;
-			}
-			
-			/** Initiates cycle runs until all event queues of component instances are empty. */
-			
-			void runFullCycle() override {
-				do {
-					runCycle();
-				}
-				while (!is«EVENT_QUEUE.toFirstUpper»Empty());
-			}
-			
-			/** Changes event queues and initiates a cycle run.
-				This should be the execution point from an asynchronous component. */
-			
-			void runCycle() override {
-				«IF component instanceof SynchronousCompositeComponent»
-					// Changing the insert and process queues for all synchronous subcomponents
-					change«EVENT_QUEUE.toFirstUpper»s();
-				«ENDIF»
-				// Composite type-dependent behavior
-				runComponent();
-			}
-			
-			/** Initiates a cycle run without changing the event queues.
-			 * Should be used only be the container (composite system) class. */
-			void runComponent() {
-				// Starts with the clearing of the previous out-event flags
-				clearPorts();
-				// Running contained components
-				«FOR instance : component.instancesToBeScheduled»
-					«IF component instanceof CascadeCompositeComponent && instance.type instanceof SynchronousCompositeComponent»
-						«instance.name».runCycle();
-					«ELSE»
-						«instance.name».runComponent();
-					«ENDIF»
-				«ENDFOR»
-				// Notifying registered listeners
-				notifyListeners();
-			}
+		/** Creates the channel mappings and enters the wrapped statemachines. */
+		void init();
+
+		/** Clears the the boolean flags of all out-events in each contained port. */
+		void clearPorts();
+		
+		/** Notifies all registered listeners in each contained port. */
+		void notifyListeners();
+	  public:
+		«component.generateComponentClassName»();
+		
+		/** Resets the contained statemachines recursively. Must be called to initialize the component. */
+		
+		void reset() override;
+	  
+	  	/** Needed for the right event notification after initialization, as event notification from contained components
+		 * does not happen automatically (see the port implementations and runComponent method). */
+		void initListenerChain();
+		
+	«IF component instanceof SynchronousCompositeComponent»
+		/** Changes the event and process queues of all component instances. Should be used only be the container (composite system) class. */
+		void change«EVENT_QUEUE.toFirstUpper»s();
+	«ENDIF»
+		
+		/** Returns whether all event queues of the contained component instances are empty. 
+		Should be used only be the container (composite system) class. */
+		bool is«EVENT_QUEUE.toFirstUpper»Empty();
+		/** Initiates cycle runs until all event queues of component instances are empty. */
+		
+		void runFullCycle() override;
+		
+		/** Changes event queues and initiates a cycle run.
+			This should be the execution point from an asynchronous component. */
+		
+		void runCycle() override;
+		
+		/** Initiates a cycle run without changing the event queues.
+		 * Should be used only be the container (composite system) class. */
+		void runComponent();
 	
-			«IF component.needTimer»
-				/** Setter for the timer e.g., a virtual timer. */
-				//«Namings.UNIFIED_TIMER_INTERFACE»
-				void setTimer(OneThreadTimer timer) {
-					«FOR instance : component.components»
-						«IF instance.type.needTimer»
-							«instance.name».setTimer(timer);
-						«ENDIF»
-					«ENDFOR»
-				}
-			«ENDIF»
-			
-			/**  Getter for component instances, e.g., enabling to check their states. */
-			«FOR instance : component.components SEPARATOR "\n"»
-				«instance.type.generateComponentClassName»& get«instance.name.toFirstUpper»() {
-					return «instance.name»;
-				}
-			«ENDFOR»
-			
-		};
+		«IF component.needTimer»
+			/** Setter for the timer e.g., a virtual timer. */
+			//«Namings.UNIFIED_TIMER_INTERFACE»
+			void setTimer(OneThreadedTimer& timer);
+		«ENDIF»
+		
+		/**  Getter for component instances, e.g., enabling to check their states. */
+		«FOR instance : component.components SEPARATOR "\n"»
+			«instance.type.generateComponentClassName»& get«instance.name.toFirstUpper»();
+		«ENDFOR»
+		
+	};
+	#endif
 	'''
+	
+	/**
+	* Creates the C++ code of the synchronous composite class, containing the statemachine instances.
+	*/
+	protected def createSynchronousCompositeComponentClass(AbstractSynchronousCompositeComponent component){
+	val classScope = component.generateComponentClassName+ "::"
+	return '''
+	
+	#include "«component.generateComponentClassName.toFirstUpper».h"
+	
+	//SynchronousCompositeComponentCode
+
+	«classScope»«component.generateComponentClassName»(«FOR parameter : component.parameterDeclarations SEPARATOR ", "»«parameter.type.transformType» «parameter.name»«ENDFOR») :
+		«component.createInitList» {
+		
+		«component.createInstances»
+		init();
+	}
+	
+	/** Resets the contained statemachines recursively. Must be called to initialize the component. */
+	
+	void «classScope»reset() {
+		«FOR instance : component.components»
+			«instance.name».reset();
+		«ENDFOR»								
+		// Initializing chain of listeners and events 
+		initListenerChain();
+	}
+
+	/** Creates the channel mappings and enters the wrapped statemachines. */
+	void «classScope»init() {
+		// Registration of simple channels
+		«FOR channelMatch : SimpleChannels.Matcher.on(engine).getAllMatches(component, null, null, null)»
+			«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»().registerListener(«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»());
+			«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»().registerListener(«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»());
+		«ENDFOR»
+		// Registration of broadcast channels
+		«FOR channelMatch : BroadcastChannels.Matcher.on(engine).getAllMatches(component, null, null, null)»
+			«channelMatch.providedPort.instance.name».get«channelMatch.providedPort.port.name.toFirstUpper»().registerListener(«channelMatch.requiredPort.instance.name».get«channelMatch.requiredPort.port.name.toFirstUpper»());
+		«ENDFOR»
+		«IF component instanceof CascadeCompositeComponent»
+			// Setting only a single queue for cascade statecharts
+			«FOR instance : component.components.filter[it.type instanceof StatechartDefinition]»
+				«instance.name».change«INSERT_QUEUE.toFirstUpper»();
+			«ENDFOR»
+		«ENDIF»
+	}
+
+	/** Clears the the boolean flags of all out-events in each contained port. */
+	void «classScope»clearPorts() {
+		«FOR portBinding : component.portBindings»
+			get«portBinding.compositeSystemPort.name.toFirstUpper»().clear();
+		«ENDFOR»
+	}
+	
+	/** Notifies all registered listeners in each contained port. */
+	void «classScope»notifyListeners() {
+		«FOR portBinding : component.portBindings»
+			get«portBinding.compositeSystemPort.name.toFirstUpper»().notifyListeners();
+		«ENDFOR»
+	}
+
+	/** Needed for the right event notification after initialization, as event notification from contained components
+	 * does not happen automatically (see the port implementations and runComponent method). */
+	void «classScope»initListenerChain() {
+		«FOR instance : component.components.filter[!(it.type instanceof StatechartDefinition)]»
+			«instance.name».initListenerChain();
+		«ENDFOR»
+		notifyListeners();
+	}
+	
+	«IF component instanceof SynchronousCompositeComponent»
+		/** Changes the event and process queues of all component instances. Should be used only be the container (composite system) class. */
+		void «classScope»change«EVENT_QUEUE.toFirstUpper»s() {
+			«FOR instance : component.components.filter[!(it.type instanceof CascadeCompositeComponent)]»
+				«instance.name».change«EVENT_QUEUE.toFirstUpper»s();
+			«ENDFOR»
+		}
+	«ENDIF»
+	
+	/** Returns whether all event queues of the contained component instances are empty. 
+	Should be used only be the container (composite system) class. */
+	bool «classScope»is«EVENT_QUEUE.toFirstUpper»Empty() {
+		return «FOR instance : component.components SEPARATOR " && "»«instance.name».is«EVENT_QUEUE.toFirstUpper»Empty()«ENDFOR»;
+	}
+	
+	/** Initiates cycle runs until all event queues of component instances are empty. */
+	
+	void «classScope»runFullCycle() {
+		do {
+			runCycle();
+		}
+		while (!is«EVENT_QUEUE.toFirstUpper»Empty());
+	}
+	
+	/** Changes event queues and initiates a cycle run.
+		This should be the execution point from an asynchronous component. */
+	
+	void «classScope»runCycle() {
+		«IF component instanceof SynchronousCompositeComponent»
+			// Changing the insert and process queues for all synchronous subcomponents
+			change«EVENT_QUEUE.toFirstUpper»s();
+		«ENDIF»
+		// Composite type-dependent behavior
+		runComponent();
+	}
+	
+	/** Initiates a cycle run without changing the event queues.
+	 * Should be used only be the container (composite system) class. */
+	void «classScope»runComponent() {
+		// Starts with the clearing of the previous out-event flags
+		clearPorts();
+		// Running contained components
+		«FOR instance : component.instancesToBeScheduled»
+			«IF component instanceof CascadeCompositeComponent && instance.type instanceof SynchronousCompositeComponent»
+				«instance.name».runCycle();
+			«ELSE»
+				«instance.name».runComponent();
+			«ENDIF»
+		«ENDFOR»
+		// Notifying registered listeners
+		notifyListeners();
+	}
+
+	«IF component.needTimer»
+		/** Setter for the timer e.g., a virtual timer. */
+		void «classScope»setTimer(OneThreadedTimer& timer) {
+			«FOR instance : component.components»
+				«IF instance.type.needTimer»
+					«instance.name».setTimer(timer);
+				«ENDIF»
+			«ENDFOR»
+		}
+	«ENDIF»
+	
+	/**  Getter for component instances, e.g., enabling to check their states. */
+	«FOR instance : component.components SEPARATOR "\n"»
+		«instance.type.generateComponentClassName»& «classScope»get«instance.name.toFirstUpper»() {
+			return «instance.name»;
+		}
+	«ENDFOR»
+	'''
+	}
 	
 }
